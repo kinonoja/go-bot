@@ -15,16 +15,31 @@ Executes user-submitted Go code inside an isolated Docker container.
   "files": {
     "main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}"
   },
-  "mode": "run",
+  "grader_files": {
+    "lesson_test.go": "package main\n\nimport \"testing\"\n\nfunc TestGreeting(t *testing.T) {}"
+  },
+  "expected_tests": ["TestGreeting"],
+  "mode": "test",
   "timeout_ms": 5000
 }
 ```
 
-| Field        | Type              | Description                                      |
-|--------------|-------------------|--------------------------------------------------|
-| `files`      | `map[string]string` | File name to source code. Max 10 files.         |
-| `mode`       | `string`          | `"run"` or `"test"`.                             |
-| `timeout_ms` | `int`             | Hard timeout in milliseconds. Must be positive.  |
+| Field            | Type                | Description                                                  |
+|------------------|---------------------|--------------------------------------------------------------|
+| `files`          | `map[string]string` | Required student source files.                               |
+| `grader_files`   | `map[string]string` | Optional grader tests; accepted only in `test` mode.         |
+| `expected_tests` | `[]string`          | Optional test names expected from lesson grader tests.       |
+| `mode`           | `string`            | `"run"` or `"test"`.                                        |
+| `timeout_ms`     | `int`               | Hard timeout in milliseconds. Must be positive.              |
+
+Student and grader files share a limit of 10 files and 100 KB total source.
+Student file names must end in `.go`; `_test.go`, `go.mod`, `go.work`, and
+`go.sum` are reserved. Names cannot be empty, dot-prefixed, contain `..` or
+path separators, and student names cannot collide after lower-casing. Grader
+files must end in `_test.go`, obey the same path and dot-name restrictions,
+and cannot collide with a student file after lower-casing. `expected_tests`
+is accepted only in test mode, allows at most 100 unique non-empty names
+matching `^Test[A-Za-z0-9_]*$`.
 
 **Response**
 
@@ -34,6 +49,7 @@ Executes user-submitted Go code inside an isolated Docker container.
   "stdout": "hello\n",
   "stderr": "",
   "duration_ms": 312,
+  "missing_tests": [],
   "tests": [
     {
       "name": "TestAdd",
@@ -44,17 +60,19 @@ Executes user-submitted Go code inside an isolated Docker container.
 }
 ```
 
-| Field         | Type           | Description                                              |
-|---------------|----------------|----------------------------------------------------------|
-| `status`      | `string`       | `"ok"`, `"compile_error"`, `"timeout"`, `"runtime_error"` |
-| `stdout`      | `string`       | Program stdout, capped at 64 KB.                         |
-| `stderr`      | `string`       | Program stderr, capped at 64 KB.                         |
-| `duration_ms` | `int`          | Wall-clock execution time in milliseconds.               |
-| `tests`       | `[]TestResult` | Present only when `mode` is `"test"`.                    |
+| Field           | Type           | Description                                                |
+|-----------------|----------------|------------------------------------------------------------|
+| `status`        | `string`       | `"ok"`, `"compile_error"`, `"timeout"`, `"runtime_error"` |
+| `stdout`        | `string`       | Program stdout, capped at 64 KB.                           |
+| `stderr`        | `string`       | Program stderr, capped at 64 KB.                           |
+| `duration_ms`   | `int`          | Wall-clock execution time in milliseconds.                 |
+| `tests`         | `[]TestResult` | Present only when `mode` is `"test"`.                      |
+| `missing_tests` | `[]string`     | Expected tests without a parsed pass or fail outcome. Always present. |
 
 When `mode` is `"test"`, the runner builds a test binary with `go test -c`,
 streams its JSON events through `go tool test2json`, and parses them into the
-`tests` array.
+`tests` array. `missing_tests` contains expected test names that did not
+produce a pass or fail result, in the order supplied by `expected_tests`.
 
 The runner builds submissions before executing them. Exit code `97` is
 reserved as the shell signal for a build failure and maps to
@@ -68,10 +86,16 @@ Returns `{"status": "ok"}` with HTTP 200.
 ## Validation Rules
 
 - `mode` must be `"run"` or `"test"`.
-- At least one file required, at most 10.
-- File names must not contain `/`, `\`, or `..`.
-- File names must not be absolute paths.
-- Total payload size must not exceed 100 KB.
+- At least one student file is required. Student and grader files combined
+  cannot exceed 10 files or 100 KB of source.
+- Student files must end in `.go`; they cannot end in `_test.go` or be named
+  `go.mod`, `go.work`, or `go.sum`.
+- Student and grader names cannot be empty or dot-prefixed, contain `..`, or
+  contain `/` or `\`. Student names must be unique after lower-casing.
+- `grader_files` is accepted only in test mode. Each grader name must end in
+  `_test.go` and cannot collide with a student name after lower-casing.
+- `expected_tests` is accepted only in test mode. It allows at most 100
+  unique, non-empty names matching `^Test[A-Za-z0-9_]*$`.
 - `timeout_ms` must be positive.
 - When the concurrency semaphore is full, returns HTTP 429.
 
@@ -148,6 +172,17 @@ host or other submissions.
 | Path traversal in files   | File names validated to reject separators and `..`.            |
 | Denial of service         | Concurrency semaphore limits parallel executions; excess → 429.|
 | Container leaks           | The runner removes containers on exit and kills them on timeout.|
+
+## Known limitations
+
+Student code and grader tests run in one process, so a determined student can
+fake passing output or otherwise interfere with the grader. This is accepted
+because grading integrity only affects that student's own progress, while the
+sandbox protects the host either way.
+
+The runner must only be reachable from the API service and must never be
+exposed to browsers. `grader_files` must come from trusted lesson content and
+never from user input.
 
 ### Residual Risks
 
