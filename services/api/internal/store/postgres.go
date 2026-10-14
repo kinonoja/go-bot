@@ -47,8 +47,9 @@ func (p *Postgres) CompleteLesson(ctx context.Context, userID string, key Lesson
 	if attempts == 0 {
 		attempts = 1
 	}
+	awarded := AwardXP(lessonXP, attempts == 1)
 	var inserted string
-	err = tx.QueryRow(ctx, `INSERT INTO progress (user_id, course_slug, chapter_slug, lesson_slug, attempts, xp_awarded) VALUES ($1, $2, $3, $4, $5, 0) ON CONFLICT DO NOTHING RETURNING user_id::text`, userID, key.CourseSlug, key.ChapterSlug, key.LessonSlug, attempts).Scan(&inserted)
+	err = tx.QueryRow(ctx, `INSERT INTO progress (user_id, course_slug, chapter_slug, lesson_slug, attempts, xp_awarded) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING RETURNING user_id::text`, userID, key.CourseSlug, key.ChapterSlug, key.LessonSlug, attempts, awarded).Scan(&inserted)
 	if err == pgx.ErrNoRows {
 		if err := tx.Commit(ctx); err != nil {
 			return false, 0, fmt.Errorf("commit existing lesson completion: %w", err)
@@ -57,11 +58,6 @@ func (p *Postgres) CompleteLesson(ctx context.Context, userID string, key Lesson
 	}
 	if err != nil {
 		return false, 0, fmt.Errorf("insert lesson progress: %w", err)
-	}
-	awarded := AwardXP(lessonXP, attempts == 1)
-	_, err = tx.Exec(ctx, `UPDATE progress SET xp_awarded = $5 WHERE user_id = $1 AND course_slug = $2 AND chapter_slug = $3 AND lesson_slug = $4`, userID, key.CourseSlug, key.ChapterSlug, key.LessonSlug, awarded)
-	if err != nil {
-		return false, 0, fmt.Errorf("update lesson XP: %w", err)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO xp_events (user_id, course_slug, chapter_slug, lesson_slug, amount, reason) VALUES ($1, $2, $3, $4, $5, $6)`, userID, key.CourseSlug, key.ChapterSlug, key.LessonSlug, awarded, "lesson_completed")
 	if err != nil {
