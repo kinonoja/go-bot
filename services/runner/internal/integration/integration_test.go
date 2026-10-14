@@ -184,11 +184,16 @@ func TestIntegration_ForkBomb(t *testing.T) {
 	src := `package main
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 )
 
 func main() {
+	fmt.Println("started")
+	os.Stdout.Sync()
+
 	var wg sync.WaitGroup
 	for i := 0; i < 200; i++ {
 		wg.Add(1)
@@ -217,6 +222,9 @@ func main() {
 	if result.Status != "runtime_error" && result.Status != "timeout" {
 		t.Fatalf("status = %q, want %q or %q", result.Status, "runtime_error", "timeout")
 	}
+	if !strings.Contains(result.Stdout, "started") {
+		t.Fatalf("stdout = %q, want it to contain %q", result.Stdout, "started")
+	}
 	noLeakedContainers(t)
 }
 
@@ -226,7 +234,15 @@ func TestIntegration_MemoryHog(t *testing.T) {
 
 	src := `package main
 
+import (
+	"fmt"
+	"os"
+)
+
 func main() {
+	fmt.Println("started")
+	os.Stdout.Sync()
+
 	var data [][]byte
 	for {
 		data = append(data, make([]byte, 10*1024*1024))
@@ -242,6 +258,9 @@ func main() {
 
 	if result.Status != "runtime_error" {
 		t.Fatalf("status = %q, want %q\nstderr: %s", result.Status, "runtime_error", result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "started") {
+		t.Fatalf("stdout = %q, want it to contain %q", result.Stdout, "started")
 	}
 
 	resp, err := http.Get(server.URL + "/healthz")
@@ -332,7 +351,7 @@ func TestIntegration_TestMode(t *testing.T) {
 
 	result := runRequest(t, server, types.RunRequest{
 		Files: map[string]string{
-			"main.go": "package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
+			"main.go":      "package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
 			"main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Error(\"expected 5\")\n\t}\n}\n\nfunc TestAddNegative(t *testing.T) {\n\tif Add(-1, 1) != 0 {\n\t\tt.Error(\"expected 0\")\n\t}\n}\n",
 		},
 		Mode:      "test",
