@@ -2,9 +2,12 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -306,5 +309,119 @@ func TestErrorResponsesAreValidJSON(t *testing.T) {
 	data, _ := io.ReadAll(response.Body)
 	if err := json.Unmarshal(data, &value); err != nil || value["error"] == "" {
 		t.Fatalf("error response is not consistent JSON: %s", data)
+	}
+}
+
+type failingTestStore struct {
+	base    *store.Memory
+	failAt  string
+	failure error
+}
+
+func newFailingTestStore(failAt string) *failingTestStore {
+	return &failingTestStore{base: store.NewMemory(), failAt: failAt, failure: errors.New("database sentinel failure")}
+}
+
+func (s *failingTestStore) UpsertUser(ctx context.Context, email, displayName string) (store.User, error) {
+	if s.failAt == "upsert_user" {
+		return store.User{}, s.failure
+	}
+	return s.base.UpsertUser(ctx, email, displayName)
+}
+
+func (s *failingTestStore) RecordSubmission(ctx context.Context, submission store.Submission) error {
+	if s.failAt == "record_submission" {
+		return s.failure
+	}
+	return s.base.RecordSubmission(ctx, submission)
+}
+
+func (s *failingTestStore) CompleteLesson(ctx context.Context, userID string, key store.LessonKey, xp int) (bool, int, error) {
+	if s.failAt == "complete_lesson" {
+		return false, 0, s.failure
+	}
+	return s.base.CompleteLesson(ctx, userID, key, xp)
+}
+
+func (s *failingTestStore) ReadProgress(ctx context.Context, userID string) ([]store.Progress, error) {
+	if s.failAt == "read_progress" {
+		return nil, s.failure
+	}
+	return s.base.ReadProgress(ctx, userID)
+}
+
+func (s *failingTestStore) TotalXP(ctx context.Context, userID string) (int, error) {
+	if s.failAt == "total_xp" {
+		return 0, s.failure
+	}
+	return s.base.TotalXP(ctx, userID)
+}
+
+type runnerStub struct {
+	response runnerclient.Response
+	err      error
+}
+
+func (s runnerStub) Run(context.Context, runnerclient.Request) (runnerclient.Response, error) {
+	return s.response, s.err
+}
+
+func TestDependencyErrorsAreMappedAndLogged(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		failAt     string
+		runnerErr  error
+		wantStatus int
+		wantBody   string
+		wantLog    string
+	}{
+		{name: "user upsert during submit", path: "submit", failAt: "upsert_user", wantStatus: http.StatusInternalServerError, wantBody: "could not save your submission", wantLog: "database sentinel failure"},
+		{name: "submission save", path: "submit", failAt: "record_submission", wantStatus: http.StatusInternalServerError, wantBody: "could not save your submission", wantLog: "database sentinel failure"},
+		{name: "completion save", path: "submit", failAt: "complete_lesson", wantStatus: http.StatusInternalServerError, wantBody: "could not save your submission", wantLog: "database sentinel failure"},
+		{name: "user upsert during progress", path: "progress", failAt: "upsert_user", wantStatus: http.StatusInternalServerError, wantBody: "could not load your progress", wantLog: "database sentinel failure"},
+		{name: "progress read", path: "progress", failAt: "read_progress", wantStatus: http.StatusInternalServerError, wantBody: "could not load your progress", wantLog: "database sentinel failure"},
+		{name: "total XP read", path: "progress", failAt: "total_xp", wantStatus: http.StatusInternalServerError, wantBody: "could not load your progress", wantLog: "database sentinel failure"},
+		{name: "runner failure", path: "submit", runnerErr: errors.New("runner sentinel failure"), wantStatus: http.StatusBadGateway, wantBody: "runner is unavailable", wantLog: "runner sentinel failure"},
+		{name: "runner rate limited", path: "submit", runnerErr: runnerclient.ErrRateLimited, wantStatus: http.StatusServiceUnavailable, wantBody: "runner is busy", wantLog: "runner rate limited the request"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			previousLogger := slog.Default()
+			var logOutput bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logOutput, nil)))
+			defer slog.SetDefault(previousLogger)
+			dataStore := newFailingTestStore(test.failAt)
+			responseFromRunner := okResponse()
+			if test.runnerErr != nil {
+				responseFromRunner = runnerclient.Response{}
+			}
+			handler := NewHandler(loadFixtureCourses(t), dataStore, runnerStub{response: responseFromRunner, err: test.runnerErr}, true)
+			path := "/api/me/progress"
+			if test.path == "submit" {
+				path = "/api/courses/go-course/lessons/start/hello/submit"
+			}
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			if test.path == "submit" {
+				request.Method = http.MethodPost
+				request.Body = io.NopCloser(strings.NewReader(`{"files":{"main.go":"package main"}}`))
+			}
+			request.Header.Set("X-Dev-User-Email", "failure@example.test")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus || !strings.Contains(response.Body.String(), test.wantBody) {
+				t.Fatalf("response = %d %s, want status %d containing %q", response.Code, response.Body.String(), test.wantStatus, test.wantBody)
+			}
+			if strings.Contains(response.Body.String(), test.wantLog) {
+				t.Fatalf("response leaked underlying error: %s", response.Body.String())
+			}
+			requestID := response.Header().Get("X-Request-ID")
+			if requestID == "" || !strings.Contains(logOutput.String(), requestID) || !strings.Contains(logOutput.String(), test.wantLog) || !strings.Contains(logOutput.String(), "level=ERROR") {
+				t.Fatalf("error log = %q, want request ID, error %q, and error level", logOutput.String(), test.wantLog)
+			}
+			if test.failAt == "upsert_user" && strings.Contains(response.Body.String(), "authenticate") {
+				t.Fatalf("database error was reported as authentication failure: %s", response.Body.String())
+			}
+		})
 	}
 }

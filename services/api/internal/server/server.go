@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -111,7 +112,7 @@ func (h *Handler) getLesson(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.authenticatedUser(w, r)
+	user, ok := h.authenticatedUser(w, r, "could not save your submission")
 	if !ok {
 		return
 	}
@@ -147,6 +148,7 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 		Mode: "test", TimeoutMs: 30000,
 	})
 	if err != nil {
+		logCallFailure(r, "runner", err)
 		if errors.Is(err, runnerclient.ErrRateLimited) {
 			w.Header().Set("Retry-After", "2")
 			writeError(w, http.StatusServiceUnavailable, "runner is busy; retry shortly")
@@ -158,14 +160,15 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	passed := runnerResponse.Status == "ok" && len(runnerResponse.MissingTests) == 0 && expectedPassed(lesson.ExpectedTests, runnerResponse.Tests)
 	code, err := json.Marshal(request.Files)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not record submission")
+		writeError(w, http.StatusInternalServerError, "could not save your submission")
 		return
 	}
 	if err := h.store.RecordSubmission(r.Context(), store.Submission{
 		UserID: user.ID, LessonKey: key, Status: runnerResponse.Status, Passed: passed,
 		MissingTests: runnerResponse.MissingTests, DurationMs: runnerResponse.DurationMs, Code: string(code),
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not record submission")
+		logCallFailure(r, "store.record_submission", err)
+		writeError(w, http.StatusInternalServerError, "could not save your submission")
 		return
 	}
 	newlyCompleted := false
@@ -173,7 +176,8 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	if passed {
 		newlyCompleted, xpAwarded, err = h.store.CompleteLesson(r.Context(), user.ID, key, lesson.XP)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not update lesson progress")
+			logCallFailure(r, "store.complete_lesson", err)
+			writeError(w, http.StatusInternalServerError, "could not save your submission")
 			return
 		}
 	}
@@ -197,18 +201,20 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getProgress(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.authenticatedUser(w, r)
+	user, ok := h.authenticatedUser(w, r, "could not load your progress")
 	if !ok {
 		return
 	}
 	progress, err := h.store.ReadProgress(r.Context(), user.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read progress")
+		logCallFailure(r, "store.read_progress", err)
+		writeError(w, http.StatusInternalServerError, "could not load your progress")
 		return
 	}
 	totalXP, err := h.store.TotalXP(r.Context(), user.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read progress")
+		logCallFailure(r, "store.total_xp", err)
+		writeError(w, http.StatusInternalServerError, "could not load your progress")
 		return
 	}
 	completed := make([]progressLesson, 0, len(progress))
@@ -218,7 +224,7 @@ func (h *Handler) getProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, progressResponse{Completed: completed, TotalXP: totalXP})
 }
 
-func (h *Handler) authenticatedUser(w http.ResponseWriter, r *http.Request) (store.User, bool) {
+func (h *Handler) authenticatedUser(w http.ResponseWriter, r *http.Request, storeFailureMessage string) (store.User, bool) {
 	if !h.devAuth {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return store.User{}, false
@@ -231,7 +237,8 @@ func (h *Handler) authenticatedUser(w http.ResponseWriter, r *http.Request) (sto
 	displayName := strings.SplitN(email, "@", 2)[0]
 	user, err := h.store.UpsertUser(r.Context(), email, displayName)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not authenticate user")
+		logCallFailure(r, "store.upsert_user", err)
+		writeError(w, http.StatusInternalServerError, storeFailureMessage)
 		return store.User{}, false
 	}
 	return user, true
@@ -326,6 +333,7 @@ func (h *Handler) middleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", requestID)
 		recorder := &responseRecorder{ResponseWriter: w}
 		started := time.Now()
+		r = r.WithContext(context.WithValue(r.Context(), requestIDContextKey{}, requestID))
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				if recorder.status == 0 {
@@ -342,6 +350,13 @@ func (h *Handler) middleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(recorder, r)
 	})
+}
+
+type requestIDContextKey struct{}
+
+func logCallFailure(r *http.Request, area string, err error) {
+	requestID, _ := r.Context().Value(requestIDContextKey{}).(string)
+	slog.Error("API dependency call failed", "request_id", requestID, "area", area, "error", err)
 }
 
 func requestID() string {
