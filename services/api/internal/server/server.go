@@ -269,7 +269,11 @@ func (h *Handler) findLesson(courseSlug, chapterSlug, lessonSlug string) (lesson
 func expectedPassed(expected []string, actual []runnerclient.TestResult) bool {
 	passed := make(map[string]bool, len(actual))
 	for _, result := range actual {
-		passed[result.Name] = result.Passed
+		if prior, exists := passed[result.Name]; exists {
+			passed[result.Name] = prior && result.Passed
+		} else {
+			passed[result.Name] = result.Passed
+		}
 	}
 	for _, name := range expected {
 		if !passed[name] {
