@@ -57,7 +57,7 @@ func TestRun(t *testing.T) {
 
 func TestRunTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		time.Sleep(50 * time.Millisecond)
 	}))
 	defer server.Close()
 	_, err := New(server.URL, 10*time.Millisecond).Run(context.Background(), Request{})
