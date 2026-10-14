@@ -134,6 +134,7 @@ func TestSubmit(t *testing.T) {
 		{name: "duplicate result with failure cannot pass", response: runnerclient.Response{Status: "ok", Tests: []runnerclient.TestResult{{Name: "TestHello", Passed: true}, {Name: "TestHello", Passed: false}, {Name: "TestGreeting", Passed: true}}, MissingTests: []string{}}, body: `{"files":{"main.go":"package main"}}`, devAuth: true, withUser: true, wantHTTP: http.StatusOK},
 		{name: "failing", response: runnerclient.Response{Status: "runtime_error", Tests: []runnerclient.TestResult{{Name: "TestHello", Passed: false, Output: strings.Repeat("x", 2100)}}, MissingTests: []string{"TestGreeting"}}, body: `{"files":{"main.go":"package main"}}`, devAuth: true, withUser: true, wantHTTP: http.StatusOK, wantError: "runtime_error"},
 		{name: "compile error", response: runnerclient.Response{Status: "compile_error", Stderr: strings.Repeat("e", 4100), MissingTests: []string{"TestHello", "TestGreeting"}}, body: `{"files":{"main.go":"bad"}}`, devAuth: true, withUser: true, wantHTTP: http.StatusOK, wantError: "compile_error"},
+		{name: "runner error", response: runnerclient.Response{Status: "runner_error"}, body: `{"files":{"main.go":"package main"}}`, devAuth: true, withUser: true, wantHTTP: http.StatusOK, wantError: "runner_error"},
 		{name: "missing tests prevents pass", response: runnerclient.Response{Status: "ok", Tests: []runnerclient.TestResult{{Name: "TestHello", Passed: true}, {Name: "TestGreeting", Passed: true}}, MissingTests: []string{"TestGreeting"}}, body: `{"files":{"main.go":"package main"}}`, devAuth: true, withUser: true, wantHTTP: http.StatusOK, wantError: "missing_tests"},
 		{name: "runner rate limit", runnerStatus: http.StatusTooManyRequests, body: `{"files":{"main.go":"package main"}}`, devAuth: true, withUser: true, wantHTTP: http.StatusServiceUnavailable, wantRetryAfter: "2", wantError: "runner is busy"},
 		{name: "bad JSON", response: okResponse(), body: `{"files":`, devAuth: true, withUser: true, wantHTTP: http.StatusBadRequest, wantError: "invalid request JSON"},
@@ -163,6 +164,16 @@ func TestSubmit(t *testing.T) {
 				t.Fatalf("Retry-After = %q, want %q", response.Header().Get("Retry-After"), test.wantRetryAfter)
 			}
 			if test.wantHTTP == http.StatusOK {
+				var raw map[string]json.RawMessage
+				if err := json.Unmarshal(response.Body.Bytes(), &raw); err != nil {
+					t.Fatal(err)
+				}
+				for _, field := range []string{"missing_tests", "tests"} {
+					var values []json.RawMessage
+					if err := json.Unmarshal(raw[field], &values); err != nil || values == nil {
+						t.Fatalf("%s = %s, want JSON array", field, raw[field])
+					}
+				}
 				var result submitResponse
 				if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 					t.Fatal(err)
