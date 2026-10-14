@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS xp_events;
+DROP TABLE IF EXISTS progress;
+DROP TABLE IF EXISTS submissions;
+DROP TABLE IF EXISTS users;
