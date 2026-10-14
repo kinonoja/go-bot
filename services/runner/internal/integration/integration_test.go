@@ -72,8 +72,17 @@ func assertRunResponse(t *testing.T, result types.RunResponse, condition bool, f
 		return
 	}
 
+	truncate := func(value string) (string, int) {
+		characters := []rune(value)
+		if len(characters) <= 1500 {
+			return value, 0
+		}
+		return string(characters[:1500]), len(characters) - 1500
+	}
+	stdout, stdoutCut := truncate(result.Stdout)
+	stderr, stderrCut := truncate(result.Stderr)
 	message := fmt.Sprintf(format, args...)
-	fail("%s\nresponse: status=%q stdout=%q stderr=%q duration_ms=%d", message, result.Status, result.Stdout, result.Stderr, result.DurationMs)
+	fail("%s\nresponse: status=%q stdout=%q (cut %d characters) stderr=%q (cut %d characters) duration_ms=%d", message, result.Status, stdout, stdoutCut, stderr, stderrCut, result.DurationMs)
 }
 
 func noLeakedContainers(t *testing.T) {
@@ -100,8 +109,8 @@ func TestIntegration_ValidProgram(t *testing.T) {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
-	assertRunResponse(t, result, strings.Contains(result.Stdout, "hello gobot"), t.Fatalf, "stdout = %q, want it to contain %q", result.Stdout, "hello gobot")
+	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q", result.Status, "ok")
+	assertRunResponse(t, result, strings.Contains(result.Stdout, "hello gobot"), t.Fatalf, "stdout should contain %q", "hello gobot")
 	noLeakedContainers(t)
 }
 
@@ -117,7 +126,7 @@ func TestIntegration_CompileError(t *testing.T) {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "compile_error", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "compile_error", result.Stderr)
+	assertRunResponse(t, result, result.Status == "compile_error", t.Fatalf, "status = %q, want %q", result.Status, "compile_error")
 	noLeakedContainers(t)
 }
 
@@ -134,7 +143,7 @@ func TestIntegration_TestModeCompileError(t *testing.T) {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "compile_error", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "compile_error", result.Stderr)
+	assertRunResponse(t, result, result.Status == "compile_error", t.Fatalf, "status = %q, want %q", result.Status, "compile_error")
 	noLeakedContainers(t)
 }
 
@@ -157,7 +166,7 @@ func TestIntegration_InfiniteLoopTimeout(t *testing.T) {
 	assertRunResponse(t, result, elapsed <= maxDuration, t.Fatalf, "infinite loop took %v, exceeds timeout+15s (%v)", elapsed, maxDuration)
 
 	assertRunResponse(t, result, result.Status == "timeout", t.Fatalf, "status = %q, want %q", result.Status, "timeout")
-	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout = %q, want it to contain %q", result.Stdout, "started")
+	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout should contain %q", "started")
 	noLeakedContainers(t)
 }
 
@@ -189,10 +198,10 @@ func main() {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
+	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q", result.Status, "ok")
 	assertRunResponse(t, result, !strings.Contains(result.Stdout, "CONNECTION_SUCCEEDED"), t.Fatalf, "network connection succeeded, sandbox network isolation is broken")
 	hasDialErr := strings.Contains(result.Stdout, "dial error:")
-	assertRunResponse(t, result, hasDialErr, t.Fatalf, "stdout should contain a dial error, got: %q", result.Stdout)
+	assertRunResponse(t, result, hasDialErr, t.Fatalf, "stdout should contain a dial error")
 	noLeakedContainers(t)
 }
 
@@ -238,7 +247,7 @@ func main() {
 	assertRunResponse(t, result, elapsed <= maxDuration, t.Fatalf, "fork bomb took %v, exceeds timeout+13s (%v)", elapsed, maxDuration)
 
 	assertRunResponse(t, result, result.Status == "runtime_error" || result.Status == "timeout", t.Fatalf, "status = %q, want %q or %q", result.Status, "runtime_error", "timeout")
-	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout = %q, want it to contain %q", result.Stdout, "started")
+	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout should contain %q", "started")
 	noLeakedContainers(t)
 }
 
@@ -273,8 +282,8 @@ func main() {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "runtime_error", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "runtime_error", result.Stderr)
-	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout = %q, want it to contain %q", result.Stdout, "started")
+	assertRunResponse(t, result, result.Status == "runtime_error", t.Fatalf, "status = %q, want %q", result.Status, "runtime_error")
+	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout should contain %q", "started")
 
 	resp, err := http.Get(server.URL + "/healthz")
 	if err != nil {
@@ -313,9 +322,9 @@ func main() {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
+	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q", result.Status, "ok")
 	assertRunResponse(t, result, !strings.Contains(result.Stdout, "WRITE_SUCCEEDED"), t.Fatalf, "write to read-only filesystem succeeded, sandbox isolation is broken")
-	assertRunResponse(t, result, strings.Contains(result.Stdout, "write blocked:"), t.Fatalf, "stdout should report write error, got: %q", result.Stdout)
+	assertRunResponse(t, result, strings.Contains(result.Stdout, "write blocked:"), t.Fatalf, "stdout should report write error")
 	noLeakedContainers(t)
 }
 
@@ -340,9 +349,9 @@ func main() {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
+	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q", result.Status, "ok")
 	assertRunResponse(t, result, !strings.Contains(result.Stdout, "uid: 0"), t.Fatalf, "process running as root (uid 0), sandbox should use non-root user")
-	assertRunResponse(t, result, strings.Contains(result.Stdout, "uid:"), t.Fatalf, "stdout should contain uid, got: %q", result.Stdout)
+	assertRunResponse(t, result, strings.Contains(result.Stdout, "uid:"), t.Fatalf, "stdout should contain %q", "uid:")
 	noLeakedContainers(t)
 }
 
@@ -359,7 +368,7 @@ func TestIntegration_TestMode(t *testing.T) {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
+	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q", result.Status, "ok")
 	assertRunResponse(t, result, len(result.Tests) != 0, t.Fatalf, "expected test results")
 	for _, tr := range result.Tests {
 		assertRunResponse(t, result, tr.Passed, t.Errorf, "test %q failed", tr.Name)
@@ -380,7 +389,7 @@ func TestIntegration_TestModeMixedResults(t *testing.T) {
 		TimeoutMs: 30000,
 	})
 
-	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
+	assertRunResponse(t, result, result.Status == "runtime_error", t.Fatalf, "status = %q, want %q", result.Status, "runtime_error")
 	passed := 0
 	failed := 0
 	for _, test := range result.Tests {
