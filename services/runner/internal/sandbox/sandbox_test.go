@@ -129,27 +129,41 @@ func TestContainerArgs(t *testing.T) {
 	}
 }
 
-func TestStatusForExitCode(t *testing.T) {
+func TestStatusForExecution(t *testing.T) {
 	tests := []struct {
-		name string
-		code int
-		mode string
-		want string
+		name     string
+		exitCode int
+		stderr   string
+		timedOut bool
+		want     string
 	}{
-		{name: "run build failure", code: 97, mode: "run", want: "compile_error"},
-		{name: "test build failure", code: 97, mode: "test", want: "compile_error"},
-		{name: "run code 1 remains runtime error", code: 1, mode: "run", want: "runtime_error"},
-		{name: "test failure remains ok status", code: 1, mode: "test", want: "ok"},
-		{name: "run code 2 remains compile error", code: 2, mode: "run", want: "compile_error"},
-		{name: "test code 2 remains compile error", code: 2, mode: "test", want: "compile_error"},
-		{name: "run unknown code remains runtime error", code: 3, mode: "run", want: "runtime_error"},
-		{name: "test unknown code remains runtime error", code: 3, mode: "test", want: "runtime_error"},
+		{name: "exit 0 without stderr", exitCode: 0, want: "ok"},
+		{name: "exit 0 with syntax stderr", exitCode: 0, stderr: "syntax error", want: "ok"},
+		{name: "exit 1 without stderr", exitCode: 1, want: "runtime_error"},
+		{name: "exit 1 with fatal stderr", exitCode: 1, stderr: "fatal error", want: "runtime_error"},
+		{name: "exit 2 without stderr", exitCode: 2, want: "runtime_error"},
+		{name: "exit 2 with fatal stderr", exitCode: 2, stderr: "fatal error", want: "runtime_error"},
+		{name: "exit 97 without stderr", exitCode: 97, want: "compile_error"},
+		{name: "exit 97 with syntax stderr", exitCode: 97, stderr: "syntax error", want: "compile_error"},
+		{name: "exit 125 without stderr", exitCode: 125, want: "runtime_error"},
+		{name: "exit 125 with fatal stderr", exitCode: 125, stderr: "fatal error", want: "runtime_error"},
+		{name: "exit 126 without stderr", exitCode: 126, want: "runtime_error"},
+		{name: "exit 126 with syntax stderr", exitCode: 126, stderr: "syntax error", want: "runtime_error"},
+		{name: "exit 127 without stderr", exitCode: 127, want: "runtime_error"},
+		{name: "exit 127 with fatal stderr", exitCode: 127, stderr: "fatal error", want: "runtime_error"},
+		{name: "exit 137 without stderr", exitCode: 137, want: "runtime_error"},
+		{name: "exit 137 with syntax stderr", exitCode: 137, stderr: "syntax error", want: "runtime_error"},
+		{name: "exit 139 without stderr", exitCode: 139, want: "runtime_error"},
+		{name: "exit 139 with fatal stderr", exitCode: 139, stderr: "fatal error", want: "runtime_error"},
+		{name: "exit 143 without stderr", exitCode: 143, want: "runtime_error"},
+		{name: "exit 143 with syntax stderr", exitCode: 143, stderr: "syntax error", want: "runtime_error"},
+		{name: "timeout overrides exit code and stderr", exitCode: 137, stderr: "fatal error", timedOut: true, want: "timeout"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := statusForExitCode(tt.code, tt.mode); got != tt.want {
-				t.Errorf("statusForExitCode(%d, %q) = %q, want %q", tt.code, tt.mode, got, tt.want)
+			if got := statusForExecution(tt.exitCode, tt.stderr, tt.timedOut); got != tt.want {
+				t.Errorf("statusForExecution(%d, %q, %v) = %q, want %q", tt.exitCode, tt.stderr, tt.timedOut, got, tt.want)
 			}
 		})
 	}

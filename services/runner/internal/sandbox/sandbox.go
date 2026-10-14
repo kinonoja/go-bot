@@ -51,7 +51,7 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	if runCtx.Err() == context.DeadlineExceeded {
 		killContainer(containerName)
 		return &types.RunResponse{
-			Status:     "timeout",
+			Status:     statusForExecution(0, stderr.String(), true),
 			Stdout:     truncate(stdout.String()),
 			Stderr:     truncate(stderr.String()),
 			DurationMs: duration.Milliseconds(),
@@ -67,26 +67,28 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	if runErr != nil {
 		exitErr, ok := runErr.(*exec.ExitError)
 		if !ok {
-			resp.Status = "runtime_error"
+			resp.Status = statusForExecution(-1, stderr.String(), false)
 		} else {
-			resp.Status = statusForExitCode(exitErr.ExitCode(), req.Mode)
+			resp.Status = statusForExecution(exitErr.ExitCode(), stderr.String(), false)
 		}
 	} else {
-		resp.Status = "ok"
+		resp.Status = statusForExecution(0, stderr.String(), false)
 	}
 
 	return resp
 }
 
-func statusForExitCode(code int, mode string) string {
-	switch {
-	case code == 97 || code == 2:
-		return "compile_error"
-	case code == 1 && mode == "test":
-		return "ok"
-	default:
-		return "runtime_error"
+func statusForExecution(exitCode int, _ string, timedOut bool) string {
+	if timedOut {
+		return "timeout"
 	}
+	if exitCode == 97 {
+		return "compile_error"
+	}
+	if exitCode == 0 {
+		return "ok"
+	}
+	return "runtime_error"
 }
 
 func containerArgs(containerName, workDir, mode string) []string {
