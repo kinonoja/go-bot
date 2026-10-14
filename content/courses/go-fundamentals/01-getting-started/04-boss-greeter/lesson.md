@@ -1,5 +1,5 @@
 ---
-title: Boss Challenge: Build a Greeter
+title: "Boss Challenge: Build a Greeter"
 xp: 150
 difficulty: hard
 boss: true
