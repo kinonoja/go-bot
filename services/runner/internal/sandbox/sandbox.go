@@ -62,7 +62,6 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	args := []string{
 		"run",
 		"--name", containerName,
-		"--rm",
 		"--network", "none",
 		"--memory", "256m",
 		"--cpus", "0.5",
@@ -77,6 +76,8 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 		SandboxImage,
 		"sh", "-c", goCmd,
 	}
+
+	defer removeContainer(containerName)
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(runCtx, "docker", args...)
@@ -105,14 +106,18 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 
 	if runErr != nil {
 		exitErr, ok := runErr.(*exec.ExitError)
-		if ok && exitErr.ExitCode() == 1 && req.Mode == "test" {
-			resp.Status = "ok"
-		} else if ok && exitErr.ExitCode() == 2 {
-			resp.Status = "compile_error"
-		} else if ok && exitErr.ExitCode() == 1 {
-			resp.Status = "compile_error"
-		} else {
+		if !ok {
 			resp.Status = "runtime_error"
+		} else {
+			code := exitErr.ExitCode()
+			switch {
+			case code == 1 && req.Mode == "test":
+				resp.Status = "ok"
+			case code == 2:
+				resp.Status = "compile_error"
+			default:
+				resp.Status = "runtime_error"
+			}
 		}
 	} else {
 		resp.Status = "ok"
@@ -125,6 +130,12 @@ func killContainer(name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = exec.CommandContext(ctx, "docker", "kill", name).Run()
+	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
+}
+
+func removeContainer(name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
 }
 
