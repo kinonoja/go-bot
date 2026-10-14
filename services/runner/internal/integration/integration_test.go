@@ -141,12 +141,10 @@ func TestIntegration_TestModeCompileError(t *testing.T) {
 	defer server.Close()
 
 	result := runRequest(t, server, types.RunRequest{
-		Files: map[string]string{
-			"main.go":      "package main\n\nfunc main() {}\n",
-			"main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestUndefined(t *testing.T) {\n\tUndefinedSymbol()\n}\n",
-		},
-		Mode:      "test",
-		TimeoutMs: 30000,
+		Files:       map[string]string{"main.go": "package main\n\nfunc main() {}\n"},
+		GraderFiles: map[string]string{"grader_test.go": "package main\n\nimport \"testing\"\n\nfunc TestUndefined(t *testing.T) {\n\tUndefinedSymbol()\n}\n"},
+		Mode:        "test",
+		TimeoutMs:   30000,
 	})
 
 	assertRunResponse(t, result, result.Status == "compile_error", t.Fatalf, "status = %q, want %q", result.Status, "compile_error")
@@ -366,15 +364,19 @@ func TestIntegration_TestMode(t *testing.T) {
 
 	result := runRequest(t, server, types.RunRequest{
 		Files: map[string]string{
-			"main.go":      "package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
-			"main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Error(\"expected 5\")\n\t}\n}\n\nfunc TestAddNegative(t *testing.T) {\n\tif Add(-1, 1) != 0 {\n\t\tt.Error(\"expected 0\")\n\t}\n}\n",
+			"main.go": "package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
 		},
-		Mode:      "test",
-		TimeoutMs: 30000,
+		GraderFiles: map[string]string{
+			"grader_test.go": "package main\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Error(\"expected 5\")\n\t}\n}\n\nfunc TestAddNegative(t *testing.T) {\n\tif Add(-1, 1) != 0 {\n\t\tt.Error(\"expected 0\")\n\t}\n}\n",
+		},
+		ExpectedTests: []string{"TestAdd", "TestAddNegative"},
+		Mode:          "test",
+		TimeoutMs:     30000,
 	})
 
 	assertRunResponse(t, result, result.Status == "ok", t.Fatalf, "status = %q, want %q", result.Status, "ok")
-	assertRunResponse(t, result, len(result.Tests) != 0, t.Fatalf, "expected test results")
+	assertRunResponse(t, result, len(result.Tests) == 2, t.Fatalf, "test results = %d, want 2", len(result.Tests))
+	assertRunResponse(t, result, len(result.MissingTests) == 0, t.Fatalf, "missing_tests = %#v, want empty list", result.MissingTests)
 	for _, tr := range result.Tests {
 		assertRunResponse(t, result, tr.Passed, t.Errorf, "test %q failed", tr.Name)
 	}
@@ -387,11 +389,14 @@ func TestIntegration_TestModeMixedResults(t *testing.T) {
 
 	result := runRequest(t, server, types.RunRequest{
 		Files: map[string]string{
-			"main.go":      "package main\n\nfunc Value() int {\n\treturn 1\n}\n",
-			"main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestPassing(t *testing.T) {}\n\nfunc TestFailing(t *testing.T) {\n\tt.Error(\"intentional failure\")\n}\n",
+			"main.go": "package main\n\nfunc Value() int {\n\treturn 1\n}\n",
 		},
-		Mode:      "test",
-		TimeoutMs: 30000,
+		GraderFiles: map[string]string{
+			"grader_test.go": "package main\n\nimport \"testing\"\n\nfunc TestPassing(t *testing.T) {}\n\nfunc TestFailing(t *testing.T) {\n\tt.Error(\"intentional failure\")\n}\n",
+		},
+		ExpectedTests: []string{"TestPassing", "TestFailing"},
+		Mode:          "test",
+		TimeoutMs:     30000,
 	})
 
 	assertRunResponse(t, result, result.Status == "runtime_error", t.Fatalf, "status = %q, want %q", result.Status, "runtime_error")
@@ -406,4 +411,55 @@ func TestIntegration_TestModeMixedResults(t *testing.T) {
 	}
 	assertRunResponse(t, result, passed == 1 && failed == 1, t.Fatalf, "test results have %d passing and %d failing, want one of each: %+v", passed, failed, result.Tests)
 	noLeakedContainers(t)
+}
+
+func TestIntegration_StudentInitExitsBeforeTests(t *testing.T) {
+	server := setupServer(t)
+	defer server.Close()
+
+	result := runRequest(t, server, types.RunRequest{
+		Files: map[string]string{
+			"main.go": "package main\n\nimport \"os\"\n\nfunc init() { os.Exit(0) }\n\nfunc main() {}\n",
+		},
+		GraderFiles: map[string]string{
+			"grader_test.go": "package main\n\nimport \"testing\"\n\nfunc TestFirst(t *testing.T) {}\n\nfunc TestSecond(t *testing.T) {}\n",
+		},
+		ExpectedTests: []string{"TestFirst", "TestSecond"},
+		Mode:          "test",
+		TimeoutMs:     30000,
+	})
+
+	assertRunResponse(t, result, len(result.MissingTests) == 2 && result.MissingTests[0] == "TestFirst" && result.MissingTests[1] == "TestSecond", t.Fatalf, "missing_tests = %#v, want [TestFirst TestSecond]", result.MissingTests)
+	noLeakedContainers(t)
+}
+
+func TestIntegration_StudentTestFileRejected(t *testing.T) {
+	server := setupServer(t)
+	defer server.Close()
+
+	body, err := json.Marshal(types.RunRequest{
+		Files:     map[string]string{"main_test.go": "package main"},
+		Mode:      "test",
+		TimeoutMs: 30000,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	resp, err := http.Post(server.URL+"/run", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	var response map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := `invalid student file name "main_test.go": student files cannot end in _test.go`
+	if response["error"] != want {
+		t.Fatalf("error = %q, want %q", response["error"], want)
+	}
 }

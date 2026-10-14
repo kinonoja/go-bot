@@ -2,6 +2,8 @@ package testparse
 
 import (
 	"testing"
+
+	"github.com/kinonoja/gobot/services/runner/internal/types"
 )
 
 func TestParse(t *testing.T) {
@@ -115,5 +117,62 @@ func TestParseOutputAccumulation(t *testing.T) {
 	want := "hello world\n"
 	if results[0].Output != want {
 		t.Errorf("output = %q, want %q", results[0].Output, want)
+	}
+}
+
+func TestMissing(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected []string
+		results  []types.TestResult
+		want     []string
+	}{
+		{
+			name:     "all expected tests have pass or fail outcomes",
+			expected: []string{"TestPass", "TestFail"},
+			results: []types.TestResult{
+				{Name: "TestPass", Passed: true, Completed: true},
+				{Name: "TestFail", Passed: false, Completed: true},
+			},
+			want: []string{},
+		},
+		{
+			name:     "some expected tests are missing or incomplete",
+			expected: []string{"TestPass", "TestMissing", "TestIncomplete"},
+			results: []types.TestResult{
+				{Name: "TestPass", Passed: true, Completed: true},
+				{Name: "TestIncomplete", Completed: false},
+			},
+			want: []string{"TestMissing", "TestIncomplete"},
+		},
+		{
+			name:     "none of the expected tests have results",
+			expected: []string{"TestOne", "TestTwo"},
+			results:  []types.TestResult{},
+			want:     []string{"TestOne", "TestTwo"},
+		},
+		{
+			name:     "empty expected list",
+			expected: []string{},
+			results:  []types.TestResult{{Name: "TestOne", Passed: true, Completed: true}},
+			want:     []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Missing(tt.expected, tt.results)
+			if len(got) != len(tt.want) {
+				t.Fatalf("Missing() = %#v, want %#v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("Missing() = %#v, want %#v", got, tt.want)
+				}
+			}
+			if len(tt.want) == 0 && got == nil {
+				t.Fatal("Missing() returned nil, want empty list")
+			}
+		})
 	}
 }

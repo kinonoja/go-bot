@@ -53,7 +53,7 @@ func TestValidate(t *testing.T) {
 		{name: "student go.sum rejected", req: validRequest(map[string]string{"go.sum": "x"}, "run"), wantErr: `invalid student file name "go.sum": reserved file name`},
 		{name: "student path traversal rejected", req: validRequest(map[string]string{"../evil.go": "x"}, "run"), wantErr: `invalid student file name "../evil.go": contains ".."`},
 		{name: "student forward slash rejected", req: validRequest(map[string]string{"sub/main.go": "x"}, "run"), wantErr: `invalid student file name "sub/main.go": contains path separator`},
-		{name: "student backslash rejected", req: validRequest(map[string]string{"sub\\main.go": "x"}, "run"), wantErr: `invalid student file name "sub\main.go": contains path separator`},
+		{name: "student backslash rejected", req: validRequest(map[string]string{"sub\\main.go": "x"}, "run"), wantErr: `invalid student file name "sub\\main.go": contains path separator`},
 		{name: "dot-prefixed student name rejected", req: validRequest(map[string]string{".hidden.go": "x"}, "run"), wantErr: `invalid student file name ".hidden.go": name must not start with "."`},
 		{name: "student names collide after lower-casing", req: validRequest(map[string]string{"Main.go": "x", "main.go": "y"}, "run"), wantErr: `student file names "Main.go" and "main.go" collide after lower-casing`},
 		{

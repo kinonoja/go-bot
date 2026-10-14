@@ -11,25 +11,28 @@ import (
 
 func TestCreateWorkspacePermissions(t *testing.T) {
 	tests := []struct {
-		name  string
-		files map[string]string
+		name         string
+		studentFiles map[string]string
+		graderFiles  map[string]string
 	}{
 		{
-			name:  "single submitted file",
-			files: map[string]string{"main.go": "package main"},
+			name:         "single student file",
+			studentFiles: map[string]string{"main.go": "package main"},
 		},
 		{
-			name: "multiple submitted files",
-			files: map[string]string{
-				"main.go":      "package main",
-				"main_test.go": "package main",
+			name: "student and grader files",
+			studentFiles: map[string]string{
+				"main.go": "package main",
+			},
+			graderFiles: map[string]string{
+				"grader_test.go": "package main",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			workDir, err := createWorkspace(tt.files)
+			workDir, err := createWorkspace(tt.studentFiles, tt.graderFiles)
 			if err != nil {
 				t.Fatalf("createWorkspace() error = %v", err)
 			}
@@ -43,11 +46,35 @@ func TestCreateWorkspacePermissions(t *testing.T) {
 				t.Errorf("workspace permissions = %04o, want 0755", got)
 			}
 
-			for name := range tt.files {
+			for name := range tt.studentFiles {
+				assertWorkspaceFilePermissions(t, workDir, name)
+			}
+			for name := range tt.graderFiles {
 				assertWorkspaceFilePermissions(t, workDir, name)
 			}
 			assertWorkspaceFilePermissions(t, workDir, "go.mod")
 		})
+	}
+}
+
+func TestWorkspaceFilesDoNotOverwriteExistingFiles(t *testing.T) {
+	workDir := t.TempDir()
+	studentFiles := map[string]string{"grader_test.go": "student"}
+	graderFiles := map[string]string{"grader_test.go": "grader"}
+
+	if err := writeWorkspaceFiles(workDir, studentFiles); err != nil {
+		t.Fatalf("write student file: %v", err)
+	}
+	if err := writeWorkspaceFiles(workDir, graderFiles); err == nil {
+		t.Fatal("write grader file over existing file: got nil error")
+	}
+
+	content, err := os.ReadFile(filepath.Join(workDir, "grader_test.go"))
+	if err != nil {
+		t.Fatalf("read existing file: %v", err)
+	}
+	if string(content) != "student" {
+		t.Fatalf("file content = %q, want %q", content, "student")
 	}
 }
 
