@@ -52,8 +52,14 @@ Executes user-submitted Go code inside an isolated Docker container.
 | `duration_ms` | `int`          | Wall-clock execution time in milliseconds.               |
 | `tests`       | `[]TestResult` | Present only when `mode` is `"test"`.                    |
 
-When `mode` is `"test"`, the runner executes `go test -json ./...` and parses
-the JSON event stream into the `tests` array.
+When `mode` is `"test"`, the runner builds a test binary with `go test -c`,
+streams its JSON events through `go tool test2json`, and parses them into the
+`tests` array.
+
+The runner builds submissions before executing them. Exit code `97` is
+reserved as the shell signal for a build failure and maps to
+`compile_error`. A submission that calls `os.Exit(97)` is also reported as
+`compile_error`; this affects only that submission's result.
 
 ### GET /healthz
 
