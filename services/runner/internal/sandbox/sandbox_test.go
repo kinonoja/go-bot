@@ -1,9 +1,65 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCreateWorkspacePermissions(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name:  "single submitted file",
+			files: map[string]string{"main.go": "package main"},
+		},
+		{
+			name: "multiple submitted files",
+			files: map[string]string{
+				"main.go":      "package main",
+				"main_test.go": "package main",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workDir, err := createWorkspace(tt.files)
+			if err != nil {
+				t.Fatalf("createWorkspace() error = %v", err)
+			}
+			defer os.RemoveAll(workDir)
+
+			info, err := os.Stat(workDir)
+			if err != nil {
+				t.Fatalf("stat workspace: %v", err)
+			}
+			if got := info.Mode().Perm(); got != 0755 {
+				t.Errorf("workspace permissions = %04o, want 0755", got)
+			}
+
+			for name := range tt.files {
+				assertWorkspaceFilePermissions(t, workDir, name)
+			}
+			assertWorkspaceFilePermissions(t, workDir, "go.mod")
+		})
+	}
+}
+
+func assertWorkspaceFilePermissions(t *testing.T, workDir, name string) {
+	t.Helper()
+
+	info, err := os.Stat(filepath.Join(workDir, name))
+	if err != nil {
+		t.Fatalf("stat workspace file %s: %v", name, err)
+	}
+	if got := info.Mode().Perm(); got != 0644 {
+		t.Errorf("permissions for %s = %04o, want 0644", name, got)
+	}
+}
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {

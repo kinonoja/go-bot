@@ -19,7 +19,7 @@ const (
 )
 
 func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
-	workDir, err := os.MkdirTemp("", "gobot-run-*")
+	workDir, err := createWorkspace(req.Files)
 	if err != nil {
 		return &types.RunResponse{
 			Status: "runtime_error",
@@ -27,23 +27,6 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 		}
 	}
 	defer os.RemoveAll(workDir)
-
-	goMod := "module submission\n\ngo 1.23\n"
-	if err := os.WriteFile(filepath.Join(workDir, "go.mod"), []byte(goMod), 0644); err != nil {
-		return &types.RunResponse{
-			Status: "runtime_error",
-			Stderr: fmt.Sprintf("failed to write go.mod: %v", err),
-		}
-	}
-
-	for name, content := range req.Files {
-		if err := os.WriteFile(filepath.Join(workDir, name), []byte(content), 0644); err != nil {
-			return &types.RunResponse{
-				Status: "runtime_error",
-				Stderr: fmt.Sprintf("failed to write file %s: %v", name, err),
-			}
-		}
-	}
 
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -67,8 +50,11 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 		"--cpus", "0.5",
 		"--pids-limit", "64",
 		"--read-only",
-		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-		"--tmpfs", "/home/sandbox/.cache:rw,noexec,nosuid,size=128m",
+		"--tmpfs", "/tmp:rw,exec,nosuid,mode=1777,size=64m",
+		"--tmpfs", "/home/sandbox/.cache:rw,exec,nosuid,mode=1777,size=128m",
+		"--env", "GOCACHE=/home/sandbox/.cache/go-build",
+		"--env", "GOTMPDIR=/tmp",
+		"--env", "HOME=/tmp",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
 		"-v", workDir + ":/workspace:ro",
@@ -124,6 +110,38 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	}
 
 	return resp
+}
+
+func createWorkspace(files map[string]string) (string, error) {
+	workDir, err := os.MkdirTemp("", "gobot-run-*")
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.Chmod(workDir, 0755); err != nil {
+		os.RemoveAll(workDir)
+		return "", fmt.Errorf("failed to chmod temp dir: %w", err)
+	}
+
+	workspaceFiles := make(map[string]string, len(files)+1)
+	workspaceFiles["go.mod"] = "module submission\n\ngo 1.23\n"
+	for name, content := range files {
+		workspaceFiles[name] = content
+	}
+
+	for name, content := range workspaceFiles {
+		path := filepath.Join(workDir, name)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			os.RemoveAll(workDir)
+			return "", fmt.Errorf("failed to write file %s: %w", name, err)
+		}
+		if err := os.Chmod(path, 0644); err != nil {
+			os.RemoveAll(workDir)
+			return "", fmt.Errorf("failed to chmod file %s: %w", name, err)
+		}
+	}
+
+	return workDir, nil
 }
 
 func killContainer(name string) {
