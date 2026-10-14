@@ -59,13 +59,18 @@ func TestLoad(t *testing.T) {
 		{
 			name: "loads content and orders numeric prefixes",
 			mutate: func(t *testing.T, paths fixturePaths) {
-				secondChapter := filepath.Join(paths.course, "02-alpha-chapter")
-				writeFixtureFile(t, filepath.Join(secondChapter, "chapter.yaml"), "title: Second Chapter\ndescription: Later chapter\n")
-				secondLesson := filepath.Join(secondChapter, "01-alpha-lesson")
+				secondLesson := filepath.Join(paths.chapter, "02-alpha-lesson")
 				writeFixtureFile(t, filepath.Join(secondLesson, "lesson.md"), fixtureLessonMarkdown())
 				writeFixtureFile(t, filepath.Join(secondLesson, "starter", "main.go"), "package main\nfunc Value() int { return 0 }\n")
 				writeFixtureFile(t, filepath.Join(secondLesson, "solution", "main.go"), "package main\nfunc Value() int { return 1 }\n")
 				writeFixtureFile(t, filepath.Join(secondLesson, "tests", "main_test.go"), "package main\nimport \"testing\"\nfunc TestOne(t *testing.T) {}\nfunc TestTwo(t *testing.T) {}\n")
+				secondChapter := filepath.Join(paths.course, "02-alpha-chapter")
+				writeFixtureFile(t, filepath.Join(secondChapter, "chapter.yaml"), "title: Second Chapter\ndescription: Later chapter\n")
+				secondChapterLesson := filepath.Join(secondChapter, "01-alpha-lesson")
+				writeFixtureFile(t, filepath.Join(secondChapterLesson, "lesson.md"), fixtureLessonMarkdown())
+				writeFixtureFile(t, filepath.Join(secondChapterLesson, "starter", "main.go"), "package main\nfunc Value() int { return 0 }\n")
+				writeFixtureFile(t, filepath.Join(secondChapterLesson, "solution", "main.go"), "package main\nfunc Value() int { return 1 }\n")
+				writeFixtureFile(t, filepath.Join(secondChapterLesson, "tests", "main_test.go"), "package main\nimport \"testing\"\nfunc TestOne(t *testing.T) {}\nfunc TestTwo(t *testing.T) {}\n")
 			},
 			check: func(t *testing.T, courses []Course) {
 				if len(courses) != 1 || courses[0].Slug != "go-course" {
@@ -75,7 +80,7 @@ func TestLoad(t *testing.T) {
 				if len(chapters) != 2 || chapters[0].Slug != "first-chapter" || chapters[1].Slug != "alpha-chapter" {
 					t.Fatalf("chapter order = %#v", chapters)
 				}
-				if len(chapters[0].Lessons) != 1 || chapters[0].Lessons[0].ExpectedTests[1] != "TestTwo" {
+				if len(chapters[0].Lessons) != 2 || chapters[0].Lessons[0].Slug != "first-lesson" || chapters[0].Lessons[1].Slug != "alpha-lesson" {
 					t.Fatalf("lessons = %#v", chapters[0].Lessons)
 				}
 			},
@@ -168,6 +173,12 @@ func TestLoadRejectsInvalidContent(t *testing.T) {
 		{name: "xp above maximum", mutate: func(t *testing.T, p fixturePaths) {
 			writeFixtureFile(t, filepath.Join(p.lesson, "lesson.md"), strings.Replace(fixtureLessonMarkdown(), "xp: 25", "xp: 501", 1))
 		}, wantPath: "lesson.md", wantMessage: "xp must be an integer from 10 to 500"},
+		{name: "non-integer xp", mutate: func(t *testing.T, p fixturePaths) {
+			writeFixtureFile(t, filepath.Join(p.lesson, "lesson.md"), strings.Replace(fixtureLessonMarkdown(), "xp: 25", "xp: many", 1))
+		}, wantPath: "lesson.md", wantMessage: "invalid YAML frontmatter"},
+		{name: "empty lesson title", mutate: func(t *testing.T, p fixturePaths) {
+			writeFixtureFile(t, filepath.Join(p.lesson, "lesson.md"), strings.Replace(fixtureLessonMarkdown(), "title: First Lesson", "title: ''", 1))
+		}, wantPath: "lesson.md", wantMessage: "title must not be empty"},
 		{name: "invalid difficulty", mutate: func(t *testing.T, p fixturePaths) {
 			writeFixtureFile(t, filepath.Join(p.lesson, "lesson.md"), strings.Replace(fixtureLessonMarkdown(), "difficulty: easy", "difficulty: expert", 1))
 		}, wantPath: "lesson.md", wantMessage: "difficulty must be easy, medium, or hard"},
