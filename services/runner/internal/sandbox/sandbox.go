@@ -22,11 +22,12 @@ const (
 )
 
 func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
-	workDir, err := createWorkspace(req.Files)
+	workDir, err := createWorkspace(req.Files, req.GraderFiles)
 	if err != nil {
 		return &types.RunResponse{
-			Status: "runtime_error",
-			Stderr: fmt.Sprintf("failed to create temp dir: %v", err),
+			Status:       "runtime_error",
+			Stderr:       fmt.Sprintf("failed to create temp dir: %v", err),
+			MissingTests: []string{},
 		}
 	}
 	defer os.RemoveAll(workDir)
@@ -51,17 +52,19 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	if runCtx.Err() == context.DeadlineExceeded {
 		killContainer(containerName)
 		return &types.RunResponse{
-			Status:     statusForExecution(0, stderr.String(), true),
-			Stdout:     truncate(stdout.String()),
-			Stderr:     truncate(stderr.String()),
-			DurationMs: duration.Milliseconds(),
+			Status:       statusForExecution(0, stderr.String(), true),
+			Stdout:       truncate(stdout.String()),
+			Stderr:       truncate(stderr.String()),
+			DurationMs:   duration.Milliseconds(),
+			MissingTests: []string{},
 		}
 	}
 
 	resp := &types.RunResponse{
-		Stdout:     truncate(stdout.String()),
-		Stderr:     truncate(stderr.String()),
-		DurationMs: duration.Milliseconds(),
+		Stdout:       truncate(stdout.String()),
+		Stderr:       truncate(stderr.String()),
+		DurationMs:   duration.Milliseconds(),
+		MissingTests: []string{},
 	}
 
 	if runErr != nil {
@@ -123,7 +126,7 @@ func executionTimeout(timeoutMs int) time.Duration {
 	return time.Duration(timeoutMs)*time.Millisecond + setupAllowance
 }
 
-func createWorkspace(files map[string]string) (string, error) {
+func createWorkspace(studentFiles, graderFiles map[string]string) (string, error) {
 	workDir, err := os.MkdirTemp("", "gobot-run-*")
 	if err != nil {
 		return "", err
@@ -134,25 +137,48 @@ func createWorkspace(files map[string]string) (string, error) {
 		return "", fmt.Errorf("failed to chmod temp dir: %w", err)
 	}
 
-	workspaceFiles := make(map[string]string, len(files)+1)
-	workspaceFiles["go.mod"] = "module submission\n\ngo 1.23\n"
-	for name, content := range files {
-		workspaceFiles[name] = content
+	if err := writeWorkspaceFile(workDir, "go.mod", "module submission\n\ngo 1.23\n"); err != nil {
+		os.RemoveAll(workDir)
+		return "", err
 	}
-
-	for name, content := range workspaceFiles {
-		path := filepath.Join(workDir, name)
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			os.RemoveAll(workDir)
-			return "", fmt.Errorf("failed to write file %s: %w", name, err)
-		}
-		if err := os.Chmod(path, 0644); err != nil {
-			os.RemoveAll(workDir)
-			return "", fmt.Errorf("failed to chmod file %s: %w", name, err)
-		}
+	if err := writeWorkspaceFiles(workDir, studentFiles); err != nil {
+		os.RemoveAll(workDir)
+		return "", err
+	}
+	if err := writeWorkspaceFiles(workDir, graderFiles); err != nil {
+		os.RemoveAll(workDir)
+		return "", err
 	}
 
 	return workDir, nil
+}
+
+func writeWorkspaceFiles(workDir string, files map[string]string) error {
+	for name, content := range files {
+		if err := writeWorkspaceFile(workDir, name, content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeWorkspaceFile(workDir, name, content string) error {
+	path := filepath.Join(workDir, name)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", name, err)
+	}
+	if _, err := file.Write([]byte(content)); err != nil {
+		file.Close()
+		return fmt.Errorf("failed to write file %s: %w", name, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("failed to close file %s: %w", name, err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		return fmt.Errorf("failed to chmod file %s: %w", name, err)
+	}
+	return nil
 }
 
 func killContainer(name string) {

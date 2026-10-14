@@ -48,8 +48,10 @@ func Parse(jsonOutput string) []types.TestResult {
 			r.Output += event.Output
 		case "pass":
 			r.Passed = true
+			r.Completed = true
 		case "fail":
 			r.Passed = false
+			r.Completed = true
 		}
 	}
 
@@ -58,4 +60,21 @@ func Parse(jsonOutput string) []types.TestResult {
 		out = append(out, *results[key])
 	}
 	return out
+}
+
+func Missing(expected []string, results []types.TestResult) []string {
+	completed := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.Completed {
+			completed[result.Name] = struct{}{}
+		}
+	}
+
+	missing := make([]string, 0)
+	for _, name := range expected {
+		if _, exists := completed[name]; !exists {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
