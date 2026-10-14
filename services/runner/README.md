@@ -82,10 +82,26 @@ Each submission runs in a throwaway Docker container built from
 `CGO_ENABLED=0`, `GOFLAGS=""`, and `GOPROXY=off`).
 
 The image builds a warm Go cache in `/opt/gocache` using the same Go
-environment as submissions. Each container copies that cache into its own
-writable `/tmp/gocache` tmpfs before running `go run` or `go test`. The cache
-is copied per container instead of mounted as a shared writable volume so one
-submission cannot change cached build artifacts used by another submission.
+environment as submissions. Its warm-up imports `bufio`, `bytes`, `cmp`,
+`container/heap`, `container/list`, `context`, `crypto/sha256`,
+`encoding/base64`, `encoding/binary`, `encoding/csv`, `encoding/hex`,
+`encoding/json`, `errors`, `flag`, `fmt`, `hash/fnv`, `html/template`, `io`,
+`io/fs`, `iter`, `log`, `maps`, `math`, `math/big`, `math/rand`, `net`,
+`net/http`, `net/url`, `os`, `os/exec`, `os/signal`, `path/filepath`,
+`reflect`, `regexp`, `runtime`, `slices`, `sort`, `strconv`, `strings`, `sync`,
+`sync/atomic`, `text/tabwriter`, `text/template`, `time`, `unicode`, and
+`unicode/utf8`. Test-only warm-up imports are `net/http/httptest`, `testing`,
+`testing/iotest`, and `testing/quick`.
+
+Each container copies that cache into its own writable `/tmp/gocache` tmpfs
+before running `go run` or `go test`. The cache is copied per container
+instead of mounted as a shared writable volume so one submission cannot
+change cached build artifacts used by another submission. Packages not
+covered by the warm-up imports or their dependency tree are compiled in each
+new container and can make runs slow. To warm another package, add a blank
+import for it to `sandbox/warm/main.go` (or `sandbox/warm/main_test.go` if it
+is only needed by tests), then rebuild the image with
+`docker build -t gobot-sandbox:latest services/runner/sandbox/`.
 Container startup and cache copying receive a 10-second allowance beyond the
 requested execution timeout.
 
