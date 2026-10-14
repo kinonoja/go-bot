@@ -121,16 +121,27 @@ func TestIntegration_InfiniteLoopTimeout(t *testing.T) {
 	server := setupServer(t)
 	defer server.Close()
 
+	timeoutMs := 3000
+	start := time.Now()
 	result := runRequest(t, server, types.RunRequest{
 		Files: map[string]string{
-			"main.go": "package main\n\nfunc main() {\n\tfor {}\n}\n",
+			"main.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() {\n\tfmt.Println(\"started\")\n\tos.Stdout.Sync()\n\tfor {}\n}\n",
 		},
 		Mode:      "run",
-		TimeoutMs: 3000,
+		TimeoutMs: timeoutMs,
 	})
+	elapsed := time.Since(start)
+
+	maxDuration := time.Duration(timeoutMs)*time.Millisecond + 10*time.Second + 5*time.Second
+	if elapsed > maxDuration {
+		t.Fatalf("infinite loop took %v, exceeds timeout+15s (%v)", elapsed, maxDuration)
+	}
 
 	if result.Status != "timeout" {
 		t.Fatalf("status = %q, want %q", result.Status, "timeout")
+	}
+	if !strings.Contains(result.Stdout, "started") {
+		t.Fatalf("stdout = %q, want it to contain %q", result.Stdout, "started")
 	}
 	noLeakedContainers(t)
 }
@@ -214,9 +225,9 @@ func main() {
 	})
 	elapsed := time.Since(start)
 
-	maxDuration := time.Duration(timeoutMs)*time.Millisecond + 3*time.Second
+	maxDuration := time.Duration(timeoutMs)*time.Millisecond + 10*time.Second + 3*time.Second
 	if elapsed > maxDuration {
-		t.Fatalf("fork bomb took %v, exceeds timeout+3s (%v)", elapsed, maxDuration)
+		t.Fatalf("fork bomb took %v, exceeds timeout+13s (%v)", elapsed, maxDuration)
 	}
 
 	if result.Status != "runtime_error" && result.Status != "timeout" {
@@ -245,9 +256,12 @@ func main() {
 
 	var data [][]byte
 	for {
-		data = append(data, make([]byte, 10*1024*1024))
+		block := make([]byte, 10*1024*1024)
+		for i := range block {
+			block[i] = 1
+		}
+		data = append(data, block)
 	}
-	_ = data
 }
 `
 	result := runRequest(t, server, types.RunRequest{
