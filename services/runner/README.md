@@ -72,24 +72,35 @@ Returns `{"status": "ok"}` with HTTP 200.
 ## Sandbox Restrictions
 
 Each submission runs in a throwaway Docker container built from
-`sandbox/Dockerfile` (`golang:1.23-alpine`, non-root user, `GOPROXY=off`).
+`sandbox/Dockerfile` (`golang:1.23-alpine`, non-root `sandbox` user,
+`CGO_ENABLED=0`, `GOFLAGS=""`, and `GOPROXY=off`).
+
+The image builds a warm Go cache in `/opt/gocache` using the same Go
+environment as submissions. Each container copies that cache into its own
+writable `/tmp/gocache` tmpfs before running `go run` or `go test`. The cache
+is copied per container instead of mounted as a shared writable volume so one
+submission cannot change cached build artifacts used by another submission.
+Container startup and cache copying receive a 10-second allowance beyond the
+requested execution timeout.
 
 Docker run flags:
 
 | Flag                       | Purpose                                |
 |----------------------------|----------------------------------------|
 | `--network none`           | No network access                      |
-| `--memory 256m`            | Memory limit                           |
+| `--memory 512m`            | Memory limit                           |
 | `--cpus 0.5`               | CPU limit                              |
 | `--pids-limit 64`          | Process limit (mitigates fork bombs)   |
 | `--read-only`              | Read-only root filesystem              |
-| `--tmpfs /tmp`             | Writable tmpfs for temp files          |
-| `--tmpfs ~/.cache`         | Writable tmpfs for Go build cache      |
+| `--user sandbox`           | Run as the unprivileged sandbox user   |
+| `--tmpfs /tmp:rw,exec,size=384m` | Writable executable temp/cache area |
 | `--cap-drop ALL`           | Drop all Linux capabilities            |
 | `--security-opt no-new-privileges` | Prevent privilege escalation   |
 
 User source files are mounted read-only at `/workspace`. A synthetic `go.mod`
-is generated for each submission.
+is generated for each submission. The workspace directory is mode `0755` and
+files are mode `0644` so the sandbox user can read them through the read-only
+mount.
 
 If the timeout is reached, the container is killed and removed. Stdout and
 stderr are each capped at 64 KB; output beyond the cap is truncated with a
@@ -107,14 +118,14 @@ host or other submissions.
 | Network exfiltration      | `--network none` blocks all network access.                    |
 | File system tampering     | `--read-only` root FS; source mounted read-only.               |
 | Resource exhaustion (CPU) | `--cpus 0.5` plus hard timeout with container kill.            |
-| Resource exhaustion (RAM) | `--memory 256m` enforced by the container runtime OOM killer.  |
+| Resource exhaustion (RAM) | `--memory 512m` enforced by the container runtime OOM killer.  |
 | Fork bomb                 | `--pids-limit 64` caps total processes in the container.       |
 | Privilege escalation      | Non-root user, `--cap-drop ALL`, `no-new-privileges`.          |
 | Downloading dependencies  | `GOPROXY=off` prevents module fetches; combined with no network.|
 | Output flooding           | Stdout and stderr capped at 64 KB each.                        |
 | Path traversal in files   | File names validated to reject separators and `..`.            |
 | Denial of service         | Concurrency semaphore limits parallel executions; excess → 429.|
-| Container leaks           | Hard timeout kills and removes containers; `--rm` on normal exit.|
+| Container leaks           | The runner removes containers on exit and kills them on timeout.|
 
 ### Residual Risks
 
@@ -123,13 +134,12 @@ host or other submissions.
   gVisor/Kata Containers would add an additional isolation layer.
 - Side-channel attacks (timing, cache) are not mitigated by container
   isolation alone.
-- Disk I/O through tmpfs is bounded by available RAM but could still cause
-  temporary pressure on the host.
+- Disk I/O through the 384 MB tmpfs is bounded by the container memory limit
+  but could still cause temporary pressure on the host.
 
 ## Running
 
 ```bash
-# Build the sandbox image
 docker build -t gobot-sandbox:latest services/runner/sandbox/
 
 # Start the runner

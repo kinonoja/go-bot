@@ -35,6 +35,12 @@ Build the sandbox image:
 docker build -t gobot-sandbox:latest services/runner/sandbox/
 ```
 
+The sandbox image prebuilds a Go cache at `/opt/gocache` with `CGO_ENABLED=0`,
+empty `GOFLAGS`, and `GOPROXY=off`. Each container copies that cache into its
+own writable tmpfs at `/tmp/gocache`. Do not share a writable cache volume
+between submissions: one submission could change cache contents used by
+another.
+
 Run unit tests:
 
 ```bash
