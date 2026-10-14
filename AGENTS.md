@@ -7,10 +7,10 @@ Go Bot teaches the Go programming language through graded coding lessons. The pl
 ## Monorepo layout
 
 - `apps/web/`: web frontend; currently a placeholder.
-- `services/api/`: lesson API module with the content loader and lessoncheck command; API endpoints remain a placeholder.
+- `services/api/`: API service, Postgres store, lesson loader, runner client, migrations, and lessoncheck command.
 - `services/runner/`: HTTP service that validates and runs submitted Go programs in Docker, with unit and integration tests.
 - `content/courses/`: ordered Go course, chapter, and lesson content.
-- `deploy/`: planned deployment configuration.
+- `deploy/`: local Postgres Compose configuration and environment template.
 - `go.work`: Go workspace for the API and runner modules.
 
 ## Lesson content layout
@@ -85,6 +85,41 @@ Run API unit tests:
 cd services/api && GOCACHE=/tmp/gocache-build go test ./...
 ```
 
+Start local Postgres and apply the API migrations:
+
+```bash
+cp deploy/.env.example deploy/.env
+docker compose -f deploy/docker-compose.yml up -d db
+set -a
+. deploy/.env
+set +a
+make migrate-up
+```
+
+Roll back the latest migration with `make migrate-down` after loading `DATABASE_URL` from `deploy/.env` the same way.
+
+Start the runner and API in separate terminals from the repository root:
+
+```bash
+(cd services/runner && go run ./cmd/runner)
+```
+
+```bash
+(cd services/api && DATABASE_URL='postgres://gobot:replace-me@localhost:5432/gobot?sslmode=disable' RUNNER_URL=http://localhost:8080 CONTENT_DIR=../../content/courses DEV_AUTH=true go run ./cmd/api)
+```
+
+The API listens on port 8081 by default. `DEV_AUTH=true` enables the development-only `X-Dev-User-Email` header. Real authentication is not implemented.
+
+Example API requests:
+
+```bash
+curl http://localhost:8081/healthz
+curl http://localhost:8081/api/courses
+curl http://localhost:8081/api/courses/go-fundamentals/lessons/getting-started/hello-world
+curl -H 'X-Dev-User-Email: learner@example.test' http://localhost:8081/api/me/progress
+curl -X POST http://localhost:8081/api/courses/go-fundamentals/lessons/getting-started/hello-world/submit -H 'Content-Type: application/json' -H 'X-Dev-User-Email: learner@example.test' -d '{"files":{"main.go":"package main\nfunc main() {}"}}'
+```
+
 Check every lesson against the runner at `http://localhost:8080`:
 
 ```bash
@@ -102,4 +137,4 @@ cd services/api && GOCACHE=/tmp/gocache-build go run ./cmd/lessoncheck -content 
 
 ## Current status
 
-Phase 1 runner service is implemented with `POST /run`, `GET /healthz`, request validation, Docker sandbox execution, test output parsing, unit tests, and Docker-backed integration tests. Phase 2 has started with the validated course content loader, a sample Go fundamentals course, and a lessoncheck command. API endpoints, authentication, persistence, and the web app remain unimplemented. Update this section as phases progress.
+Phase 1 runner service is implemented with `POST /run`, `GET /healthz`, request validation, Docker sandbox execution, test output parsing, unit tests, and Docker-backed integration tests. Phase 2 now includes the lesson content loader, sample Go Fundamentals course, lessoncheck command, Postgres schema and store, runner client, HTTP endpoints, development-only header authentication, submission grading, XP awards, and progress reads. Production authentication and the web app remain unimplemented. Update this section as phases progress.
