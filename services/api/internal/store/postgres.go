@@ -26,11 +26,18 @@ func (p *Postgres) UpsertUser(ctx context.Context, email, displayName string) (U
 }
 
 func (p *Postgres) RecordSubmission(ctx context.Context, submission Submission) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO submissions (user_id, course_slug, chapter_slug, lesson_slug, status, passed, missing_tests, duration_ms, code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, submission.UserID, submission.LessonKey.CourseSlug, submission.LessonKey.ChapterSlug, submission.LessonKey.LessonSlug, submission.Status, submission.Passed, submission.MissingTests, submission.DurationMs, submission.Code)
+	_, err := p.pool.Exec(ctx, `INSERT INTO submissions (user_id, course_slug, chapter_slug, lesson_slug, status, passed, missing_tests, duration_ms, code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, submission.UserID, submission.LessonKey.CourseSlug, submission.LessonKey.ChapterSlug, submission.LessonKey.LessonSlug, submission.Status, submission.Passed, nonNilStrings(submission.MissingTests), submission.DurationMs, submission.Code)
 	if err != nil {
 		return fmt.Errorf("record submission: %w", err)
 	}
 	return nil
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (p *Postgres) CompleteLesson(ctx context.Context, userID string, key LessonKey, lessonXP int) (bool, int, error) {

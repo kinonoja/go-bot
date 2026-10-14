@@ -26,6 +26,31 @@ func TestAwardXP(t *testing.T) {
 	}
 }
 
+func TestNonNilStrings(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{name: "nil slice", input: nil, want: []string{}},
+		{name: "empty slice", input: []string{}, want: []string{}},
+		{name: "values", input: []string{"TestOne"}, want: []string{"TestOne"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := nonNilStrings(test.input)
+			if got == nil || len(got) != len(test.want) {
+				t.Fatalf("nonNilStrings(%v) = %v, want non-nil %v", test.input, got, test.want)
+			}
+			for i := range got {
+				if got[i] != test.want[i] {
+					t.Fatalf("nonNilStrings(%v) = %v, want %v", test.input, got, test.want)
+				}
+			}
+		})
+	}
+}
+
 func TestMemoryStoreCompletionAndTotals(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
