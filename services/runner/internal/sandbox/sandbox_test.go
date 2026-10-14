@@ -3,8 +3,10 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateWorkspacePermissions(t *testing.T) {
@@ -58,6 +60,92 @@ func assertWorkspaceFilePermissions(t *testing.T, workDir, name string) {
 	}
 	if got := info.Mode().Perm(); got != 0644 {
 		t.Errorf("permissions for %s = %04o, want 0644", name, got)
+	}
+}
+
+func TestContainerArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		want []string
+	}{
+		{
+			name: "run mode",
+			mode: "run",
+			want: []string{
+				"run",
+				"--name", "gobot-run-123",
+				"--network", "none",
+				"--memory", "512m",
+				"--cpus", "0.5",
+				"--pids-limit", "64",
+				"--read-only",
+				"--cap-drop", "ALL",
+				"--security-opt", "no-new-privileges",
+				"--user", "sandbox",
+				"--tmpfs", "/tmp:rw,exec,size=384m",
+				"-e", "GOCACHE=/tmp/gocache",
+				"-e", "GOPROXY=off",
+				"-e", "HOME=/tmp",
+				"-v", "/tmp/gobot-run-test:/workspace:ro",
+				"-w", "/workspace",
+				SandboxImage,
+				"sh", "-c", "cp -r /opt/gocache /tmp/gocache && exec go run .",
+			},
+		},
+		{
+			name: "test mode",
+			mode: "test",
+			want: []string{
+				"run",
+				"--name", "gobot-run-123",
+				"--network", "none",
+				"--memory", "512m",
+				"--cpus", "0.5",
+				"--pids-limit", "64",
+				"--read-only",
+				"--cap-drop", "ALL",
+				"--security-opt", "no-new-privileges",
+				"--user", "sandbox",
+				"--tmpfs", "/tmp:rw,exec,size=384m",
+				"-e", "GOCACHE=/tmp/gocache",
+				"-e", "GOPROXY=off",
+				"-e", "HOME=/tmp",
+				"-v", "/tmp/gobot-run-test:/workspace:ro",
+				"-w", "/workspace",
+				SandboxImage,
+				"sh", "-c", "cp -r /opt/gocache /tmp/gocache && exec go test -json ./...",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containerArgs("gobot-run-123", "/tmp/gobot-run-test", tt.mode)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("containerArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecutionTimeout(t *testing.T) {
+	tests := []struct {
+		name      string
+		timeoutMs int
+		want      time.Duration
+	}{
+		{name: "zero request timeout", timeoutMs: 0, want: 10 * time.Second},
+		{name: "one millisecond request timeout", timeoutMs: 1, want: 10*time.Second + time.Millisecond},
+		{name: "five second request timeout", timeoutMs: 5000, want: 15 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := executionTimeout(tt.timeoutMs); got != tt.want {
+				t.Errorf("executionTimeout(%d) = %v, want %v", tt.timeoutMs, got, tt.want)
+			}
+		})
 	}
 }
 

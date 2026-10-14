@@ -16,6 +16,9 @@ const (
 	MaxOutputBytes = 64 * 1024
 	TruncationMsg  = "\n... output truncated ..."
 	SandboxImage   = "gobot-sandbox:latest"
+	setupAllowance = 10 * time.Second
+	runCommand     = "cp -r /opt/gocache /tmp/gocache && exec go run ."
+	testCommand    = "cp -r /opt/gocache /tmp/gocache && exec go test -json ./..."
 )
 
 func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
@@ -28,42 +31,13 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	}
 	defer os.RemoveAll(workDir)
 
-	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := context.WithTimeout(ctx, executionTimeout(req.TimeoutMs))
 	defer cancel()
 
-	var goCmd string
-	switch req.Mode {
-	case "test":
-		goCmd = "go test -json ./..."
-	default:
-		goCmd = "go run ."
-	}
-
 	containerName := fmt.Sprintf("gobot-run-%d", time.Now().UnixNano())
-
-	args := []string{
-		"run",
-		"--name", containerName,
-		"--network", "none",
-		"--memory", "256m",
-		"--cpus", "0.5",
-		"--pids-limit", "64",
-		"--read-only",
-		"--tmpfs", "/tmp:rw,exec,nosuid,mode=1777,size=64m",
-		"--tmpfs", "/home/sandbox/.cache:rw,exec,nosuid,mode=1777,size=128m",
-		"--env", "GOCACHE=/home/sandbox/.cache/go-build",
-		"--env", "GOTMPDIR=/tmp",
-		"--env", "HOME=/tmp",
-		"--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges",
-		"-v", workDir + ":/workspace:ro",
-		"-w", "/workspace",
-		SandboxImage,
-		"sh", "-c", goCmd,
-	}
-
 	defer removeContainer(containerName)
+
+	args := containerArgs(containerName, workDir, req.Mode)
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(runCtx, "docker", args...)
@@ -110,6 +84,38 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 	}
 
 	return resp
+}
+
+func containerArgs(containerName, workDir, mode string) []string {
+	command := runCommand
+	if mode == "test" {
+		command = testCommand
+	}
+
+	return []string{
+		"run",
+		"--name", containerName,
+		"--network", "none",
+		"--memory", "512m",
+		"--cpus", "0.5",
+		"--pids-limit", "64",
+		"--read-only",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--user", "sandbox",
+		"--tmpfs", "/tmp:rw,exec,size=384m",
+		"-e", "GOCACHE=/tmp/gocache",
+		"-e", "GOPROXY=off",
+		"-e", "HOME=/tmp",
+		"-v", workDir + ":/workspace:ro",
+		"-w", "/workspace",
+		SandboxImage,
+		"sh", "-c", command,
+	}
+}
+
+func executionTimeout(timeoutMs int) time.Duration {
+	return time.Duration(timeoutMs)*time.Millisecond + setupAllowance
 }
 
 func createWorkspace(files map[string]string) (string, error) {
