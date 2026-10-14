@@ -20,9 +20,9 @@ func TestRunRequestJSON(t *testing.T) {
 		},
 		{
 			name:     "test mode",
-			input:    `{"files":{"main.go":"a","main_test.go":"b"},"mode":"test","timeout_ms":3000}`,
+			input:    `{"files":{"main.go":"a"},"grader_files":{"grader_test.go":"b"},"expected_tests":["TestA"],"mode":"test","timeout_ms":3000}`,
 			wantMode: "test",
-			wantLen:  2,
+			wantLen:  1,
 		},
 	}
 
@@ -38,6 +38,14 @@ func TestRunRequestJSON(t *testing.T) {
 			if len(req.Files) != tt.wantLen {
 				t.Errorf("files len = %d, want %d", len(req.Files), tt.wantLen)
 			}
+			if tt.name == "test mode" {
+				if len(req.GraderFiles) != 1 || req.GraderFiles["grader_test.go"] != "b" {
+					t.Errorf("grader_files = %#v, want grader_test.go", req.GraderFiles)
+				}
+				if len(req.ExpectedTests) != 1 || req.ExpectedTests[0] != "TestA" {
+					t.Errorf("expected_tests = %#v, want [TestA]", req.ExpectedTests)
+				}
+			}
 		})
 	}
 }
@@ -51,6 +59,7 @@ func TestRunResponseJSON(t *testing.T) {
 		Tests: []TestResult{
 			{Name: "TestAdd", Passed: true, Output: "PASS\n"},
 		},
+		MissingTests: []string{},
 	}
 
 	data, err := json.Marshal(resp)
@@ -71,5 +80,8 @@ func TestRunResponseJSON(t *testing.T) {
 	}
 	if decoded.Tests[0].Name != "TestAdd" {
 		t.Errorf("test name = %q, want %q", decoded.Tests[0].Name, "TestAdd")
+	}
+	if decoded.MissingTests == nil || len(decoded.MissingTests) != 0 {
+		t.Errorf("missing_tests = %#v, want empty list", decoded.MissingTests)
 	}
 }
