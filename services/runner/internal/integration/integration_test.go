@@ -117,6 +117,25 @@ func TestIntegration_CompileError(t *testing.T) {
 	noLeakedContainers(t)
 }
 
+func TestIntegration_TestModeCompileError(t *testing.T) {
+	server := setupServer(t)
+	defer server.Close()
+
+	result := runRequest(t, server, types.RunRequest{
+		Files: map[string]string{
+			"main.go":      "package main\n\nfunc main() {}\n",
+			"main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestUndefined(t *testing.T) {\n\tUndefinedSymbol()\n}\n",
+		},
+		Mode:      "test",
+		TimeoutMs: 30000,
+	})
+
+	if result.Status != "compile_error" {
+		t.Fatalf("status = %q, want %q\nstderr: %s", result.Status, "compile_error", result.Stderr)
+	}
+	noLeakedContainers(t)
+}
+
 func TestIntegration_InfiniteLoopTimeout(t *testing.T) {
 	server := setupServer(t)
 	defer server.Close()
@@ -382,6 +401,37 @@ func TestIntegration_TestMode(t *testing.T) {
 		if !tr.Passed {
 			t.Errorf("test %q failed", tr.Name)
 		}
+	}
+	noLeakedContainers(t)
+}
+
+func TestIntegration_TestModeMixedResults(t *testing.T) {
+	server := setupServer(t)
+	defer server.Close()
+
+	result := runRequest(t, server, types.RunRequest{
+		Files: map[string]string{
+			"main.go":      "package main\n\nfunc Value() int {\n\treturn 1\n}\n",
+			"main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestPassing(t *testing.T) {}\n\nfunc TestFailing(t *testing.T) {\n\tt.Error(\"intentional failure\")\n}\n",
+		},
+		Mode:      "test",
+		TimeoutMs: 30000,
+	})
+
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, want %q\nstderr: %s", result.Status, "ok", result.Stderr)
+	}
+	passed := 0
+	failed := 0
+	for _, test := range result.Tests {
+		if test.Passed {
+			passed++
+		} else {
+			failed++
+		}
+	}
+	if passed != 1 || failed != 1 {
+		t.Fatalf("test results have %d passing and %d failing, want one of each: %+v", passed, failed, result.Tests)
 	}
 	noLeakedContainers(t)
 }
