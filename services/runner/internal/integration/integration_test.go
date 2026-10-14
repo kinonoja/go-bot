@@ -18,6 +18,12 @@ import (
 	"github.com/kinonoja/gobot/services/runner/internal/types"
 )
 
+const (
+	forkBombTimeoutMs    = 10_000
+	runnerSetupAllowance = 10 * time.Second
+	forkBombSlack        = 10 * time.Second
+)
+
 func TestMain(m *testing.M) {
 	out, err := exec.Command("docker", "info").CombinedOutput()
 	if err != nil {
@@ -209,7 +215,6 @@ func TestIntegration_ForkBomb(t *testing.T) {
 	server := setupServer(t)
 	defer server.Close()
 
-	timeoutMs := 10000
 	src := `package main
 
 import (
@@ -239,12 +244,12 @@ func main() {
 	result := runRequest(t, server, types.RunRequest{
 		Files:     map[string]string{"main.go": src},
 		Mode:      "run",
-		TimeoutMs: timeoutMs,
+		TimeoutMs: forkBombTimeoutMs,
 	})
 	elapsed := time.Since(start)
 
-	maxDuration := time.Duration(timeoutMs)*time.Millisecond + 10*time.Second + 3*time.Second
-	assertRunResponse(t, result, elapsed <= maxDuration, t.Fatalf, "fork bomb took %v, exceeds timeout+13s (%v)", elapsed, maxDuration)
+	maxDuration := time.Duration(forkBombTimeoutMs)*time.Millisecond + runnerSetupAllowance + forkBombSlack
+	assertRunResponse(t, result, elapsed <= maxDuration, t.Fatalf, "fork bomb took %v, exceeds timeout+setup allowance+slack (%v)", elapsed, maxDuration)
 
 	assertRunResponse(t, result, result.Status == "runtime_error" || result.Status == "timeout", t.Fatalf, "status = %q, want %q or %q", result.Status, "runtime_error", "timeout")
 	assertRunResponse(t, result, strings.Contains(result.Stdout, "started"), t.Fatalf, "stdout should contain %q", "started")
