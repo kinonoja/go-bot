@@ -90,7 +90,7 @@ func TestContainerArgs(t *testing.T) {
 				"-v", "/tmp/gobot-run-test:/workspace:ro",
 				"-w", "/workspace",
 				SandboxImage,
-				"sh", "-c", "cp -r /opt/gocache /tmp/gocache && exec go run .",
+				"sh", "-c", "cp -r /opt/gocache /tmp/gocache && { go build -o /tmp/submission . || exit 97; } && exec /tmp/submission",
 			},
 		},
 		{
@@ -114,7 +114,7 @@ func TestContainerArgs(t *testing.T) {
 				"-v", "/tmp/gobot-run-test:/workspace:ro",
 				"-w", "/workspace",
 				SandboxImage,
-				"sh", "-c", "cp -r /opt/gocache /tmp/gocache && exec go test -json ./...",
+				"sh", "-c", "cp -r /opt/gocache /tmp/gocache && { go test -c -o /tmp/submission.test . || exit 97; } && exec go tool test2json -p submission -t /tmp/submission.test -test.v",
 			},
 		},
 	}
@@ -124,6 +124,32 @@ func TestContainerArgs(t *testing.T) {
 			got := containerArgs("gobot-run-123", "/tmp/gobot-run-test", tt.mode)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("containerArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusForExitCode(t *testing.T) {
+	tests := []struct {
+		name string
+		code int
+		mode string
+		want string
+	}{
+		{name: "run build failure", code: 97, mode: "run", want: "compile_error"},
+		{name: "test build failure", code: 97, mode: "test", want: "compile_error"},
+		{name: "run code 1 remains runtime error", code: 1, mode: "run", want: "runtime_error"},
+		{name: "test failure remains ok status", code: 1, mode: "test", want: "ok"},
+		{name: "run code 2 remains compile error", code: 2, mode: "run", want: "compile_error"},
+		{name: "test code 2 remains compile error", code: 2, mode: "test", want: "compile_error"},
+		{name: "run unknown code remains runtime error", code: 3, mode: "run", want: "runtime_error"},
+		{name: "test unknown code remains runtime error", code: 3, mode: "test", want: "runtime_error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := statusForExitCode(tt.code, tt.mode); got != tt.want {
+				t.Errorf("statusForExitCode(%d, %q) = %q, want %q", tt.code, tt.mode, got, tt.want)
 			}
 		})
 	}

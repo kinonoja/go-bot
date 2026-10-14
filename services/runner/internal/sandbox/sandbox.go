@@ -17,8 +17,8 @@ const (
 	TruncationMsg  = "\n... output truncated ..."
 	SandboxImage   = "gobot-sandbox:latest"
 	setupAllowance = 10 * time.Second
-	runCommand     = "cp -r /opt/gocache /tmp/gocache && exec go run ."
-	testCommand    = "cp -r /opt/gocache /tmp/gocache && exec go test -json ./..."
+	runCommand     = "cp -r /opt/gocache /tmp/gocache && { go build -o /tmp/submission . || exit 97; } && exec /tmp/submission"
+	testCommand    = "cp -r /opt/gocache /tmp/gocache && { go test -c -o /tmp/submission.test . || exit 97; } && exec go tool test2json -p submission -t /tmp/submission.test -test.v"
 )
 
 func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
@@ -69,21 +69,24 @@ func Execute(ctx context.Context, req *types.RunRequest) *types.RunResponse {
 		if !ok {
 			resp.Status = "runtime_error"
 		} else {
-			code := exitErr.ExitCode()
-			switch {
-			case code == 1 && req.Mode == "test":
-				resp.Status = "ok"
-			case code == 2:
-				resp.Status = "compile_error"
-			default:
-				resp.Status = "runtime_error"
-			}
+			resp.Status = statusForExitCode(exitErr.ExitCode(), req.Mode)
 		}
 	} else {
 		resp.Status = "ok"
 	}
 
 	return resp
+}
+
+func statusForExitCode(code int, mode string) string {
+	switch {
+	case code == 97 || code == 2:
+		return "compile_error"
+	case code == 1 && mode == "test":
+		return "ok"
+	default:
+		return "runtime_error"
+	}
 }
 
 func containerArgs(containerName, workDir, mode string) []string {
