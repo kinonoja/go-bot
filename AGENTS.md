@@ -126,6 +126,29 @@ Check every lesson against the runner at `http://localhost:8080`:
 cd services/api && GOCACHE=/tmp/gocache-build go run ./cmd/lessoncheck -content ../../content/courses -runner-url http://localhost:8080
 ```
 
+## Web frontend
+
+Use Node 22. Install dependencies and start the Next.js app on port 3000:
+
+```bash
+cd apps/web
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Set `API_URL` to the API origin (defaults to `http://localhost:8081`) and set
+`DEV_AUTH=true` to enable the development-only continue-as form. Start the API
+with `DEV_AUTH=true` as well to use learner progress and submissions.
+
+Run the web checks from `apps/web`:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
 ## Planned phases
 
 1. Phase 1 runner service
@@ -137,4 +160,4 @@ cd services/api && GOCACHE=/tmp/gocache-build go run ./cmd/lessoncheck -content 
 
 ## Current status
 
-Phase 1 runner service is implemented with `POST /run`, `GET /healthz`, request validation, Docker sandbox execution, test output parsing, unit tests, and Docker-backed integration tests. Phase 2 now includes the lesson content loader, sample Go Fundamentals course, lessoncheck command, Postgres schema and store, runner client, HTTP endpoints, development-only header authentication, submission grading, XP awards, and progress reads. Production authentication and the web app remain unimplemented. Update this section as phases progress.
+Phase 1 runner service is implemented with `POST /run`, `GET /healthz`, request validation, Docker sandbox execution, test output parsing, unit tests, and Docker-backed integration tests. Phase 2 includes the lesson content loader, sample Go Fundamentals course, lessoncheck command, Postgres schema and store, runner client, HTTP endpoints, development-only header authentication, submission grading, XP awards, and progress reads. Phase 3 now includes the Next.js web app with API proxy, development login, course catalog, lesson editor and submission results. Production authentication remains unimplemented.

@@ -31,3 +31,5 @@ dist/
 # Temp
 tmp/
 deploy/.env
+node_modules/
+.next/
